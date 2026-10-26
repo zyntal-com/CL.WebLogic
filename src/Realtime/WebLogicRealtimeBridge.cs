@@ -107,11 +107,10 @@ public sealed class WebLogicRealtimeBridge : IWebLogicRealtimeBridge
             {
                 e.Method,
                 e.Path,
-                e.ClientIp,
                 e.StatusCode,
                 e.DurationMs
             },
-            WebLogicRealtimeAudience.Public);
+            WebLogicRealtimeAudience.Internal);
 
     private static WebLogicRealtimeEnvelope? MapRequestBlocked(WebRequestBlockedEvent e) =>
         WebLogicRealtimeEnvelope.Create(
@@ -123,11 +122,10 @@ public sealed class WebLogicRealtimeBridge : IWebLogicRealtimeBridge
             {
                 e.Method,
                 e.Path,
-                e.ClientIp,
                 e.StatusCode,
                 e.Reason
             },
-            WebLogicRealtimeAudience.Public);
+            WebLogicRealtimeAudience.Internal);
 
     private static WebLogicRealtimeEnvelope? MapThemeSynchronized(ThemeSynchronizedEvent e) =>
         WebLogicRealtimeEnvelope.Create(

@@ -8,6 +8,9 @@ namespace CL.WebLogic.AspNetCore;
 
 public sealed class WebLogicRealtimeHub : Hub
 {
+    private const string UserIdItem = "weblogic.userId";
+    private const string AccessGroupsItem = "weblogic.accessGroups";
+
     public override async Task OnConnectedAsync()
     {
         var httpContext = Context.GetHttpContext();
@@ -18,6 +21,10 @@ public sealed class WebLogicRealtimeHub : Hub
             var session = await ResolveSessionAsync(httpContext).ConfigureAwait(false);
             if (session is not null)
             {
+                // Remembered for Replay: the hub method has no HTTP request to re-check.
+                Context.Items[UserIdItem] = session.UserId;
+                Context.Items[AccessGroupsItem] = session.AccessGroups.ToArray();
+
                 await Groups.AddToGroupAsync(Context.ConnectionId, "audience:authenticated").ConfigureAwait(false);
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{session.UserId}").ConfigureAwait(false);
 
@@ -35,15 +42,32 @@ public sealed class WebLogicRealtimeHub : Hub
         var bridge = webLogic.RealtimeBridge
             ?? throw new InvalidOperationException("CL.WebLogic realtime bridge is not available.");
 
-        var take = request?.Take ?? 100;
+        var take = Math.Clamp(request?.Take ?? 100, 1, 250);
         var snapshot = bridge.CreateSnapshot(take);
         var filter = request?.Filter;
-        var filtered = snapshot.Events
+
+        // The client filter can only narrow the result: every event must first be one this
+        // connection would have received live, so User, AccessGroup and Internal events never
+        // reach other callers through the replay buffer.
+        var visible = snapshot.Events
+            .Where(CanReceive)
             .Where(evt => filter is null || filter.Matches(evt))
-            .Select(static evt => evt.ToHubMessage())
             .ToArray();
 
-        return Task.FromResult(new WebLogicRealtimeReplayResponse(snapshot, filtered));
+        var visibleSnapshot = snapshot with { Events = visible, Count = visible.Length };
+        var messages = visible.Select(static evt => evt.ToHubMessage()).ToArray();
+
+        return Task.FromResult(new WebLogicRealtimeReplayResponse(visibleSnapshot, messages));
+    }
+
+    private bool CanReceive(WebLogicRealtimeEnvelope envelope)
+    {
+        var userId = Context.Items.TryGetValue(UserIdItem, out var id) ? id as string : null;
+        var accessGroups = Context.Items.TryGetValue(AccessGroupsItem, out var groups)
+            ? groups as string[] ?? []
+            : [];
+
+        return WebLogicRealtimeAccess.CanReceive(envelope, userId, accessGroups);
     }
 
     // Reads the session cookie off the WS upgrade request and looks it up in the
@@ -108,10 +132,8 @@ public sealed class SignalRWebLogicRealtimeBroadcaster : IWebLogicRealtimeBroadc
                 break;
 
             case WebLogicRealtimeAudience.Internal:
-                await _hubContext.Clients.Group("audience:authenticated")
-                    .SendAsync("weblogic:event", message, cancellationToken)
-                    .ConfigureAwait(false);
-                break;
+                // Internal events (failures, config reloads, request logs) stay on the server.
+                return;
 
             case WebLogicRealtimeAudience.User:
                 if (envelope.Users.Count == 0)

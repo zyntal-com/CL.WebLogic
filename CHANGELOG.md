@@ -12,6 +12,16 @@ Breaking storage migration.
 - Remote theme reads use a mounted storage connection and a relative path prefix; bucket/container selection belongs to the connection configuration.
 - `WebStorageMode.Storage` replaces the S3-specific mode.
 
+### Security
+- Realtime hub `Replay` only returns events the connection would have received live (public,
+  signed-in, its own user and access groups). Before, any anonymous client could replay
+  user-targeted events such as private chat messages and notifications, and the raw snapshot
+  was returned unfiltered alongside the filtered list. `Take` is clamped to 1–250.
+- Request-handled and request-blocked events are `Internal` and no longer carry the client IP.
+  Before, every request's path and client IP were broadcast to all public hub connections.
+- `Internal` events are no longer pushed to signed-in connections; they stay on the server.
+- New `WebLogicRealtimeAccess.CanReceive` holds the audience rules.
+
 ### Removed (breaking)
 - `IncludeStorageS3`, `WebStorageMode.S3`, `S3ConnectionId`, `S3Bucket`, and `S3Prefix`.
 - Checked-in MiniBlog copies and manifests for the legacy `CL.StorageS3` library.
